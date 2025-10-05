@@ -1,0 +1,63 @@
+{{define "ArgCountCheck"}}
+
+if l.Top() != {{.}} {
+	lua.Errorf(l, "incorret number of arguments.")
+	return 0
+}
+
+{{end}}
+
+{{define "AddInstaller"}}
+
+const _LIB_NAME = "{{.LibName}}"
+
+type _LuaService interface {
+	AddLibraryFunction(libName, funcName string, f lua.Function)
+	GetState() *lua.State
+}
+
+func InstallLuaExtension(ls _LuaService) {
+	{{range .BindFuncs}}
+		ls.AddLibraryFunction(
+			_LIB_NAME,
+			"{{.Name}}",
+			_LuaBinding{{.Name}},
+		)
+	{{end}}
+}
+
+{{end}}
+
+{{define "ParseCheck"}}
+
+l := ls.GetState()
+err := lua.LoadString(l, script)
+if err != nil {
+	return nil, fmt.Errorf("error parsing lua script: %w", err)
+}
+
+{{end}}
+
+{{define "PrepState"}}
+
+l := ls.GetState()
+lua.LoadString(l, script)
+
+{{end}}
+
+{{define "DefaultArgTypeCheck"}}
+
+arg{{.index}}Temp := l.ToUserData({{.index}})
+arg{{.index}}, isTyped := arg{{.index}}Temp.({{.targetType}})
+if !isTyped {
+	lua.Errorf(l, "argument {{.index}} is incorrect type")
+	return 0
+}
+
+{{end}}
+
+{{define "DefaultRetTypePush"}}
+
+l.PushLightUserData(r{{.}})
+
+{{end}}

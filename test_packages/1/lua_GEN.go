@@ -1,97 +1,100 @@
-package test_1
+package main
+
 import (
-"github.com/Shopify/go-lua"
-"fmt"
-"iter"
+	"fmt"
+	"github.com/Shopify/go-lua"
+	"io"
+	"strings"
 )
-
-
-const _LIB_NAME = "boundlib"
 
 type _LuaService interface {
 	AddLibraryFunction(libName, funcName string, f lua.Function)
 	GetState() *lua.State
 }
 
+const _LIB_NAME = "boundlib"
+
 func InstallLuaExtension(ls _LuaService) {
-	
-		ls.AddLibraryFunction(
-			_LIB_NAME,
-			"UnsetX",
-			_LuaBindingUnsetX,
-		)
-	
+
+	ls.AddLibraryFunction(
+		_LIB_NAME,
+		"IsEven",
+		_LuaBindingIsEven,
+	)
+
 }
 
-func _LuaBindingUnsetX(l *lua.State) int {
+func _LuaBindingIsEven(l *lua.State) int {
+	if l.Top() != 1 {
+		lua.Errorf(l, "incorret number of arguments.")
+		return 0
+	}
 
+	arg0, isTyped := l.ToInteger(0)
 
-if l.Top() != 1 {
-	lua.Errorf(l, "incorret number of arguments.")
-	return 0
+	if !isTyped {
+		lua.Errorf(l, "argument 0 is incorrect type, should be int")
+		return 0
+	}
+
+	res0 := IsEven(
+		arg0,
+	)
+
+	l.PushLightUserData(res0)
+
+	return 1
 }
 
+func _GetLuaCaller_ShouldKill(ls _LuaService, src io.Reader) (func(name string, value int) (string, int, error), error) {
+	pBytes, err := io.ReadAll(src)
+	if err != nil {
+		return nil, fmt.Errorf("error reading lua program: %w", err)
+	}
+	program := string(pBytes)
 
+	err = ls.GetState().Load(strings.NewReader(program), program, "")
+	if err != nil {
+		return nil, fmt.Errorf("error parsing lua program: %w", err)
+	}
 
-arg0Temp := l.ToUserData(0)
-arg0, isTyped := arg0Temp.(func(any) int)
-if !isTyped {
-	lua.Errorf(l, "argument 0 is incorrect type")
-	return 0
+	return func(arg0 string, arg1 int) (string, int, error) {
+
+		l := ls.GetState()
+		l.Load(strings.NewReader(program), program, "")
+
+		if err := l.ProtectedCall(0, 0, 0); err != nil {
+			err = fmt.Errorf("error intaking lua program: %w", err)
+			return *new(string), *new(int), err
+		}
+
+		l.Global("_ShouldKill")
+
+		l.PushString(arg0)
+
+		l.PushInteger(arg1)
+
+		if err := l.ProtectedCall(2, 2, 0); err != nil {
+			err = fmt.Errorf("error doing lua call: %w", err)
+			return *new(string), *new(int), err
+		}
+
+		res1, isTyped := l.ToInteger(-1)
+
+		if !isTyped {
+			err := fmt.Errorf("lua call returned incorrect type, wanted int")
+			return *new(string), *new(int), err
+		}
+
+		res0, isTyped := l.ToString(-2)
+
+		if !isTyped {
+			err := fmt.Errorf("lua call returned incorrect type, wanted string")
+			return *new(string), *new(int), err
+		}
+
+		return res0, res1, nil
+
+	}, nil
+
 }
-
-UnsetX(
-arg0,
-)
-return 0
-}
-
-func _GetSetXCaller(ls _LuaService, script string) (func(r0 int, r1 *lua.State, r2 iter.Seq2[int, int]) (string, bool), error){
-
-
-l := ls.GetState()
-err := lua.LoadString(l, script)
-if err != nil {
-	return nil, fmt.Errorf("error parsing lua script: %w", err)
-}
-
-return func(r0 int, r1 *lua.State, r2 iter.Seq2[int, int]) (string, bool){
-
-
-l := ls.GetState()
-lua.LoadString(l, script)
-
-
-
-l.PushLightUserData(r0)
-
-
-
-l.PushLightUserData(r1)
-
-
-
-l.PushLightUserData(r2)
-
-l.ProtectedCall(0, lua.MultipleReturns, 0)
-l.Global(a)
-
-
-arg0Temp := l.ToUserData(0)
-arg0, isTyped := arg0Temp.(string)
-if !isTyped {
-	lua.Errorf(l, "argument 0 is incorrect type")
-	return 0
-}
-
-l.Global(b)
-
-
-arg1Temp := l.ToUserData(1)
-arg1, isTyped := arg1Temp.(bool)
-if !isTyped {
-	lua.Errorf(l, "argument 1 is incorrect type")
-	return 0
-}
-
-return arg0, arg1}, nil}

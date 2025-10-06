@@ -2,9 +2,15 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"go/ast"
+	"go/format"
+	"log/slog"
+	"strconv"
+	"strings"
+	"text/template"
 
 	"go/parser"
 
@@ -31,6 +37,19 @@ func addBindingParamInfo(
 		importPath = append(importPath, ip)
 	}
 
+	if arg.Names == nil {
+		param := BindFuncParamInfo{
+			Name: "",
+			Type: fullTypeName,
+		}
+
+		if isParam {
+			bindInfo.Arguments = append(bindInfo.Arguments, param)
+		} else {
+			bindInfo.Results = append(bindInfo.Results, param)
+		}
+	}
+
 	for _, argName := range arg.Names {
 
 		param := BindFuncParamInfo{
@@ -44,6 +63,7 @@ func addBindingParamInfo(
 			bindInfo.Results = append(bindInfo.Results, param)
 		}
 	}
+
 	return
 }
 
@@ -75,12 +95,81 @@ func GetLuaBindingFuncs(dir string) (*LuaLibraryBinding, error) {
 					Name: funcDecl.Name.Name,
 				}
 
-				for _, arg := range funcDecl.Type.Params.List {
-					lib.Imports = append(lib.Imports, addBindingParamInfo(file, arg, fset, &bindInfo, true)...)
+				if funcDecl.Type.Params != nil {
+					for _, arg := range funcDecl.Type.Params.List {
+						lib.Imports = append(lib.Imports, addBindingParamInfo(file, arg, fset, &bindInfo, true)...)
+					}
 				}
 
-				for _, res := range funcDecl.Type.Results.List {
-					addBindingParamInfo(file, res, fset, &bindInfo, false)
+				if funcDecl.Type.Results != nil {
+					for _, res := range funcDecl.Type.Results.List {
+						addBindingParamInfo(file, res, fset, &bindInfo, false)
+					}
+				}
+
+				sb := strings.Builder{}
+				for _, comment := range funcDecl.Doc.List {
+					cleaned := strings.TrimLeft(comment.Text, "/")
+					cleaned = strings.TrimSpace(cleaned)
+					if !strings.HasPrefix(cleaned, "lua:") {
+						sb.WriteString(cleaned)
+					}
+				}
+
+				bindInfo.Description = sb.String()
+
+				for _, comment := range funcDecl.Doc.List {
+					cleaned := strings.TrimLeft(comment.Text, "/")
+					cleaned = strings.TrimSpace(cleaned)
+
+					isParam := false
+					canContinue := false
+
+					if after, ok := strings.CutPrefix(cleaned, "lua:param:"); ok {
+						cleaned = after
+						isParam = true
+						canContinue = true
+					}
+
+					if after, ok := strings.CutPrefix(cleaned, "lua:retrn:"); ok {
+						cleaned = after
+						canContinue = true
+					}
+
+					if !canContinue {
+						continue
+					}
+
+					segments := strings.Split(cleaned, "-")
+					paramName := strings.TrimSpace(segments[0])
+					paramDesc := strings.TrimSpace(segments[1])
+
+					var toSearch *[]BindFuncParamInfo
+
+					if isParam {
+						toSearch = &bindInfo.Arguments
+					} else {
+						toSearch = &bindInfo.Results
+					}
+
+					targetIndex, _ := strconv.Atoi(paramName)
+					found := false
+
+				l:
+					for i, cParam := range *toSearch {
+						if (isParam && cParam.Name == paramName) || i == targetIndex {
+							found = true
+							(*toSearch)[i].Description = paramDesc
+							break l
+						}
+					}
+
+					if !found {
+						slog.Warn(
+							"Bound parameter/argument has no description set",
+							"Name", paramName, "Function", bindInfo.Name, "IsParam", isParam,
+						)
+					}
 				}
 
 				if shouldBind {
@@ -96,14 +185,16 @@ func GetLuaBindingFuncs(dir string) (*LuaLibraryBinding, error) {
 }
 
 type BindFuncParamInfo struct {
-	Name string
-	Type string
+	Name        string
+	Type        string
+	Description string
 }
 
 type LuaFunctionBindingInfo struct {
-	Name      string
-	Arguments []BindFuncParamInfo
-	Results   []BindFuncParamInfo
+	Name        string
+	Arguments   []BindFuncParamInfo
+	Results     []BindFuncParamInfo
+	Description string
 }
 
 type LuaLibraryBinding struct {
@@ -119,6 +210,7 @@ var (
 	TARGET_DIR  string
 	LIB_NAME    string
 	OUTPUT_FILE string
+	STUB_FILE   string
 )
 
 func main() {
@@ -126,6 +218,7 @@ func main() {
 	flag.StringVar(&TARGET_DIR, "dir", ".", "directory to build binding from")
 	flag.StringVar(&LIB_NAME, "name", "boundlib", "name for lua library")
 	flag.StringVar(&OUTPUT_FILE, "out", "lua_GEN.go", "output file name")
+	flag.StringVar(&STUB_FILE, "stub", "stub.lua", "output stub file name")
 
 	flag.Parse()
 
@@ -136,16 +229,72 @@ func main() {
 	}
 
 	genFile := filepath.Join(TARGET_DIR, OUTPUT_FILE)
+	stubFile := filepath.Join(TARGET_DIR, STUB_FILE)
 
 	b := &bytes.Buffer{}
 
 	bindInfo.LibName = LIB_NAME
-	if err := CreateLuaBindings(b, bindInfo); err != nil {
-		panic(fmt.Errorf("error creating bindings: %w", err))
+
+	t := template.New("")
+
+	t = t.Funcs(template.FuncMap{
+		"execOr": func(data any, fallback, target string) (string, error) {
+			toExec := target
+			if temp := t.Lookup(target); temp == nil {
+				toExec = fallback
+			}
+
+			tempWrite := bytes.Buffer{}
+			if err := t.ExecuteTemplate(&tempWrite, toExec, data); err != nil {
+				return "", fmt.Errorf("error executing subtemplate: %w", err)
+			}
+			return tempWrite.String(), nil
+		},
+		"map": func(pairs ...any) (map[string]any, error) {
+			if len(pairs)%2 != 0 {
+				return nil, errors.New("misaligned map")
+			}
+
+			m := make(map[string]any, len(pairs)/2)
+
+			for i := 0; i < len(pairs); i += 2 {
+				key, ok := pairs[i].(string)
+
+				if !ok {
+					return nil, fmt.Errorf("cannot use type %T as map key", pairs[i])
+				}
+				m[key] = pairs[i+1]
+			}
+			return m, nil
+		},
+		"tableIndex": func(len, curIndex int) int {
+			return (len - 1) - curIndex
+		},
+		"stackIndex": func(curIndex int) int {
+			return -(curIndex + 1)
+		},
+		"joinParamNamesLua": func(params []BindFuncParamInfo) string {
+
+			strs := []string{}
+			for _, param := range params {
+				strs = append(strs, param.Name)
+			}
+
+			return strings.Join(strs, ", ")
+		},
+	})
+
+	t, err = t.Parse(TEMPLATE_STR)
+	if err != nil {
+		panic(fmt.Errorf("error parsing template: %w", err))
 	}
 
-	// formatted, err := format.Source(b.Bytes())
-	formatted := b.Bytes()
+	if err := t.ExecuteTemplate(b, "main", bindInfo); err != nil {
+		panic(fmt.Errorf("error executing template: %w", err))
+	}
+
+	formatted, err := format.Source(b.Bytes())
+	// formatted := b.Bytes()
 
 	if err != nil {
 		panic(fmt.Errorf("error formatting generated code: %w", err))
@@ -155,4 +304,14 @@ func main() {
 		panic(fmt.Errorf("error writing code: %w", err))
 	}
 
+	f, err := os.Create(stubFile)
+	if err != nil {
+		panic(fmt.Errorf("error creating stub file: %w", err))
+	}
+
+	defer f.Close()
+
+	if err := t.ExecuteTemplate(f, "luaStub", bindInfo); err != nil {
+		panic(fmt.Errorf("error creating lua stub: %w", err))
+	}
 }

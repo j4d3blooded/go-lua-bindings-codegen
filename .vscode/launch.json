@@ -6,12 +6,19 @@
 	"configurations": [
 
 		{
-			"name": "Launch Package",
+			"name": "Test Against Package 1",
 			"type": "go",
 			"request": "launch",
 			"mode": "auto",
 			"program": "${workspaceFolder}",
 			"args": ["-dir", "test_packages/1"]
+		},
+		{
+			"name": "Run Package 1",
+			"type": "go",
+			"request": "launch",
+			"mode": "auto",
+			"program": "${workspaceFolder}/test_packages/1",
 		}
 	]
 }

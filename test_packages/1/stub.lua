@@ -1,4 +1,6 @@
 
+---@diagnostic disable: missing-return
+
 ---@alias int integer
 ---@alias int8 integer
 ---@alias int16 integer

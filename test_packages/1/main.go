@@ -15,15 +15,13 @@ func IsEven(a int) bool {
 	return a%2 == 0
 }
 
-// This function lets you check if you should kill someone and when to do it if you should
+// Modifies values by some rule
 //
 //lua:caller
-//lua:param:name - Name of person to check if we should kill
-//lua:param:value - Chance we should kill them
-//lua:retrn:0 - What to do
-//lua:retrn:1 - When to kill them
-func _ShouldKill(name string, value int) (string, int) {
-	return "", 0
+//lua:param:values - values to change
+//lua:retrn:0 - changed values
+func Modify(values []string) []string {
+	return nil
 }
 
 type _LuaServiceImpl struct {

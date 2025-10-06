@@ -46,7 +46,7 @@ func _LuaBindingIsEven(l *lua.State) int {
 	return 1
 }
 
-func _GetLuaCaller_ShouldKill(ls _LuaService, src io.Reader) (func(name string, value int) (string, int, error), error) {
+func _GetLuaCallerModify(ls _LuaService, src io.Reader) (func(values []string) ([]string, error), error) {
 	pBytes, err := io.ReadAll(src)
 	if err != nil {
 		return nil, fmt.Errorf("error reading lua program: %w", err)
@@ -58,42 +58,34 @@ func _GetLuaCaller_ShouldKill(ls _LuaService, src io.Reader) (func(name string, 
 		return nil, fmt.Errorf("error parsing lua program: %w", err)
 	}
 
-	return func(arg0 string, arg1 int) (string, int, error) {
+	return func(arg0 []string) ([]string, error) {
 
 		l := ls.GetState()
 		l.Load(strings.NewReader(program), program, "")
 
 		if err := l.ProtectedCall(0, 0, 0); err != nil {
 			err = fmt.Errorf("error intaking lua program: %w", err)
-			return *new(string), *new(int), err
+			return *new([]string), err
 		}
 
-		l.Global("_ShouldKill")
+		l.Global("Modify")
 
-		l.PushString(arg0)
+		l.PushLightUserData(arg0)
 
-		l.PushInteger(arg1)
-
-		if err := l.ProtectedCall(2, 2, 0); err != nil {
+		if err := l.ProtectedCall(1, 1, 0); err != nil {
 			err = fmt.Errorf("error doing lua call: %w", err)
-			return *new(string), *new(int), err
+			return *new([]string), err
 		}
 
-		res1, isTyped := l.ToInteger(-1)
+		res0Temp := l.ToUserData(-1)
+		res0, isTyped := res0Temp.([]string)
 
 		if !isTyped {
-			err := fmt.Errorf("lua call returned incorrect type, wanted int")
-			return *new(string), *new(int), err
+			err := fmt.Errorf("lua call returned incorrect type, wanted []string")
+			return *new([]string), err
 		}
 
-		res0, isTyped := l.ToString(-2)
-
-		if !isTyped {
-			err := fmt.Errorf("lua call returned incorrect type, wanted string")
-			return *new(string), *new(int), err
-		}
-
-		return res0, res1, nil
+		return res0, nil
 
 	}, nil
 

@@ -155,12 +155,20 @@ func InstallLuaExtension(ls _LuaService) {
 	l.PushInteger(int({{.argOrRes}}{{.index}}))
 {{end}}
 
+{{define "insert_runeToLua"}}
+	l.PushInteger(int({{.argOrRes}}{{.index}}))
+{{end}}
+
 {{define "insert_int64ToLua"}}
 	l.PushInteger(int({{.argOrRes}}{{.index}}))
 {{end}}
 
 {{define "insert_uintToLua"}}
 	l.PushUnsigned({{.argOrRes}}{{.index}})
+{{end}}
+
+{{define "insert_byteToLua"}}
+	l.PushUnsigned(uint({{.argOrRes}}{{.index}}))
 {{end}}
 
 {{define "insert_uint8ToLua"}}
@@ -193,6 +201,8 @@ func InstallLuaExtension(ls _LuaService) {
 
 
 {{define "luaStub"}}
+---@diagnostic disable: missing-return
+
 ---@alias int integer
 ---@alias int8 integer
 ---@alias int16 integer
